@@ -36,7 +36,8 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.springframework.lang.Nullable;
+import org.jspecify.annotations.Nullable;
+import org.springframework.lang.Contract;
 import org.springframework.modulith.core.ApplicationModule;
 import org.springframework.modulith.core.ApplicationModules;
 import org.springframework.modulith.core.DependencyDepth;
@@ -98,7 +99,7 @@ public class Documenter {
 
 	private boolean cleared;
 
-	private Map<ApplicationModule, Component> components;
+	private @Nullable Map<ApplicationModule, Component> components;
 
 	/**
 	 * Creates a new {@link Documenter} for the {@link ApplicationModules} created for the given modulith type in the
@@ -223,6 +224,7 @@ public class Documenter {
 	 * @return the current instance, will never be {@literal null}.
 	 * @since 1.2.2
 	 */
+	@Contract("_, _ -> this")
 	public Documenter writeAggregatingDocument(DiagramOptions diagramOptions, CanvasOptions canvasOptions) {
 
 		Assert.notNull(diagramOptions, "DiagramOptions must not be null!");
@@ -439,6 +441,7 @@ public class Documenter {
 		return new StringBuilder() //
 
 				.append(startTable("%autowidth.stretch, cols=\"h,a\""))
+				.append(addTableRow("Description", asciidoctor.renderModuleDescription(module), options))
 				.append(addTableRow("Base package", asciidoctor.toInlineCode(module.getBasePackage().getName()), options))
 
 				// Spring components
@@ -485,18 +488,19 @@ public class Documenter {
 				.forEach(it -> it.addTags(DependencyType.USES_COMPONENT.toString()));
 	}
 
+	@SuppressWarnings("null")
 	private Map<ApplicationModule, Component> getComponents(DiagramOptions options) {
 
-		if (components == null) {
+		if (this.components == null) {
 
 			this.components = modules.stream() //
 					.collect(Collectors.toMap(Function.identity(),
 							it -> container.addComponent(options.defaultDisplayName.apply(it), "", "Module")));
 
-			this.components.forEach((key, value) -> addDependencies(key, value, options));
+			components.forEach((key, value) -> addDependencies(key, value, options));
 		}
 
-		return components;
+		return this.components;
 	}
 
 	private void addComponentsToView(ApplicationModule module, ComponentView view, DiagramOptions options) {
@@ -643,6 +647,11 @@ public class Documenter {
 			Styles styles) {
 
 		var component = components.get(module);
+
+		if (component == null) {
+			throw new IllegalStateException("Couldn't find component for module %s!".formatted(module));
+		}
+
 		var selector = options.colorSelector;
 
 		// Apply custom color if configured
@@ -1061,6 +1070,7 @@ public class Documenter {
 			return new CanvasOptions(groupers, apiBase, targetFileName, hideInternals, hideEmptyLines);
 		}
 
+		@Nullable
 		String getApiBase() {
 			return apiBase;
 		}
@@ -1083,7 +1093,10 @@ public class Documenter {
 
 			// Wipe entries without any beans
 			new HashSet<>(result.keySet()).forEach(key -> {
-				if (result.get(key).isEmpty()) {
+
+				var value = result.get(key);
+
+				if (value != null && value.isEmpty()) {
 					result.remove(key);
 				}
 			});
@@ -1161,10 +1174,10 @@ public class Documenter {
 			 *
 			 * @param name must not be {@literal null} or empty.
 			 * @param predicate must not be {@literal null}.
-			 * @param description must not be {@literal null} or empty.
+			 * @param description can be {@literal null}.
 			 * @return will never be {@literal null}.
 			 */
-			public static Grouping of(String name, Predicate<SpringBean> predicate, String description) {
+			public static Grouping of(String name, Predicate<SpringBean> predicate, @Nullable String description) {
 				return new Grouping(name, predicate, description);
 			}
 

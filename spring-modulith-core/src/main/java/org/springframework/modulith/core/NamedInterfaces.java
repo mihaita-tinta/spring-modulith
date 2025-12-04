@@ -29,6 +29,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.springframework.core.annotation.AnnotatedElementUtils;
+import org.springframework.modulith.core.Types.JavaTypes;
 import org.springframework.util.Assert;
 import org.springframework.util.LinkedMultiValueMap;
 
@@ -298,8 +299,18 @@ public class NamedInterfaces implements Iterable<NamedInterface> {
 					var annotation = AnnotatedElementUtils.getMergedAnnotation(it.reflect(),
 							org.springframework.modulith.NamedInterface.class);
 
-					NamedInterface.getDefaultedNames(annotation, it.getPackageName())
-							.forEach(name -> mappings.add(name, it));
+					if (annotation == null) {
+						throw new IllegalStateException("No @NamedInterface annotation found!");
+					}
+
+					NamedInterface.getDefaultedNames(annotation, it.getPackageName()).forEach(name -> {
+
+						if (annotation.propagate()) {
+							mappings.addAll(name, JavaTypes.relatedTypesOf(it, classes::contains).toList());
+						} else {
+							mappings.add(name, it);
+						}
+					});
 				});
 
 		return mappings.entrySet().stream() //

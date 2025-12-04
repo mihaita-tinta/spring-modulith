@@ -22,6 +22,8 @@ import java.util.function.Supplier;
 import org.aopalliance.aop.Advice;
 import org.aopalliance.intercept.MethodInterceptor;
 import org.aopalliance.intercept.MethodInvocation;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.aop.MethodMatcher;
@@ -31,7 +33,6 @@ import org.springframework.aop.support.StaticMethodMatcher;
 import org.springframework.aop.support.annotation.AnnotationMatchingPointcut;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.AnnotatedElementUtils;
-import org.springframework.lang.NonNull;
 import org.springframework.modulith.events.core.EventPublicationRegistry;
 import org.springframework.modulith.events.core.PublicationTargetIdentifier;
 import org.springframework.transaction.event.TransactionPhase;
@@ -160,11 +161,13 @@ public class CompletionRegisteringAdvisor extends AbstractPointcutAdvisor {
 		 * @see org.aopalliance.intercept.MethodInterceptor#invoke(org.aopalliance.intercept.MethodInvocation)
 		 */
 		@Override
-		public Object invoke(MethodInvocation invocation) throws Throwable {
+		public @Nullable Object invoke(MethodInvocation invocation) throws Throwable {
 
 			Object result = null;
 			var method = invocation.getMethod();
 			var argument = invocation.getArguments()[0];
+
+			registerStateTransition(method, argument, EventPublicationRegistry::markProcessing);
 
 			try {
 
@@ -174,7 +177,7 @@ public class CompletionRegisteringAdvisor extends AbstractPointcutAdvisor {
 
 					return future
 							.thenApply(it -> {
-								markCompleted(method, argument);
+								registerStateTransition(method, argument, EventPublicationRegistry::markCompleted);
 								return it;
 							})
 							.exceptionallyCompose(it -> {
@@ -190,7 +193,7 @@ public class CompletionRegisteringAdvisor extends AbstractPointcutAdvisor {
 				throw o_O;
 			}
 
-			markCompleted(method, argument);
+			registerStateTransition(method, argument, EventPublicationRegistry::markCompleted);
 
 			return result;
 		}
@@ -206,7 +209,7 @@ public class CompletionRegisteringAdvisor extends AbstractPointcutAdvisor {
 
 		private void handleFailure(Method method, Object event, Throwable o_O) {
 
-			markFailed(method, event);
+			registerStateTransition(method, event, EventPublicationRegistry::markFailed);
 
 			if (LOG.isDebugEnabled()) {
 				LOG.debug("Invocation of listener {} failed. Leaving event publication uncompleted.", method, o_O);
@@ -216,26 +219,22 @@ public class CompletionRegisteringAdvisor extends AbstractPointcutAdvisor {
 			}
 		}
 
-		private void markCompleted(Method method, Object event) {
+		private void registerStateTransition(Method method, Object event,
+				RegistryInvoker invoker) {
 
-			// Mark publication complete if the method is a transactional event listener.
 			String adapterId = LISTENER_IDS.get(method);
 			PublicationTargetIdentifier identifier = PublicationTargetIdentifier.of(adapterId);
-			registry.get().markCompleted(event, identifier);
+
+			invoker.invoke(registry.get(), event, identifier);
 		}
 
-		private void markFailed(Method method, Object event) {
-
-			// Mark publication complete if the method is a transactional event listener.
-			String adapterId = LISTENER_IDS.get(method);
-			PublicationTargetIdentifier identifier = PublicationTargetIdentifier.of(adapterId);
-			registry.get().markFailed(event, identifier);
-		}
-
-		@SuppressWarnings("null")
 		private static String lookupListenerId(Method method) {
-			return new TransactionalApplicationListenerMethodAdapter(null, method.getDeclaringClass(), method)
+			return new TransactionalApplicationListenerMethodAdapter("¯\\_(ツ)_/¯", method.getDeclaringClass(), method)
 					.getListenerId();
+		}
+
+		private interface RegistryInvoker {
+			void invoke(EventPublicationRegistry registry, Object event, PublicationTargetIdentifier identifier);
 		}
 	}
 }

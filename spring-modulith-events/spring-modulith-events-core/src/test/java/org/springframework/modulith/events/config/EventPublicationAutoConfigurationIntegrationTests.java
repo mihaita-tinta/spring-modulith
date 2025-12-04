@@ -23,6 +23,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.function.Function;
 
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -35,7 +36,6 @@ import org.springframework.boot.test.context.assertj.AssertableApplicationContex
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.test.context.runner.ContextConsumer;
 import org.springframework.context.annotation.AdviceMode;
-import org.springframework.lang.Nullable;
 import org.springframework.modulith.events.CompletedEventPublications;
 import org.springframework.modulith.events.IncompleteEventPublications;
 import org.springframework.modulith.events.config.EventPublicationAutoConfiguration.AsyncPropertiesDefaulter;
@@ -43,6 +43,7 @@ import org.springframework.modulith.events.core.EventPublicationRegistry;
 import org.springframework.modulith.events.core.EventPublicationRepository;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.ProxyAsyncConfiguration;
+import org.springframework.scheduling.annotation.SchedulingConfigurer;
 import org.springframework.scheduling.aspectj.AspectJAsyncConfiguration;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -135,6 +136,16 @@ class EventPublicationAutoConfigurationIntegrationTests {
 					.hasSingleBean(CompletedEventPublications.class)
 					.hasSingleBean(IncompleteEventPublications.class);
 		});
+	}
+
+	@Test // GH-1321
+	void registersStalenessMonitorIfPropertiesConfigured() {
+
+		basicSetup()
+				.withPropertyValues("spring.modulith.events.staleness-check-intervall=10s")
+				.run(context -> {
+					assertThat(context).hasSingleBean(SchedulingConfigurer.class);
+				});
 	}
 
 	private static <T> ContextConsumer<AssertableApplicationContext> expect(Function<Shutdown, T> extractor,

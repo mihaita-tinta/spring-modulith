@@ -25,9 +25,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.lang.Nullable;
 import org.springframework.modulith.core.ApplicationModule;
 import org.springframework.modulith.core.ApplicationModuleDependency;
 import org.springframework.modulith.core.ApplicationModules;
@@ -408,6 +408,10 @@ class Asciidoctor {
 				.collect(joining(System.lineSeparator()));
 
 		return bullets.isBlank() ? "None" : bullets;
+	}
+
+	public String renderModuleDescription(ApplicationModule module) {
+		return docSource.flatMap(it -> it.getDocumentation(module.getBasePackage())).orElse("");
 	}
 
 	public String renderHeadline(int i, String modules) {

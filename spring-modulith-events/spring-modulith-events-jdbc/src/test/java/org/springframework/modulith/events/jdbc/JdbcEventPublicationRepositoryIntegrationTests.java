@@ -34,7 +34,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.jdbc.JdbcTest;
+import org.springframework.boot.jdbc.test.autoconfigure.JdbcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.modulith.events.core.EventSerializer;
@@ -44,6 +44,7 @@ import org.springframework.modulith.events.support.CompletionMode;
 import org.springframework.modulith.testapp.TestApplication;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -63,6 +64,7 @@ class JdbcEventPublicationRepositoryIntegrationTests {
 	@Import(TestApplication.class)
 	@Testcontainers(disabledWithoutDocker = true)
 	@ContextConfiguration(classes = JdbcEventPublicationAutoConfiguration.class)
+	@TestPropertySource(properties = "spring.modulith.events.jdbc.use-legacy-structure=true")
 	static abstract class TestBase {
 
 		@Autowired JdbcOperations operations;
@@ -390,7 +392,9 @@ class JdbcEventPublicationRepositoryIntegrationTests {
 			return "EVENT_PUBLICATION";
 		}
 
-		String archiveTable() { return table() + "_ARCHIVE"; }
+		String archiveTable() {
+			return table() + "_ARCHIVE";
+		}
 
 		private TargetEventPublication createPublication(Object event) {
 

@@ -18,9 +18,11 @@ package org.springframework.modulith.core;
 import java.lang.annotation.Annotation;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.modulith.ApplicationModule;
 import org.springframework.modulith.core.Types.JMoleculesTypes;
 import org.springframework.util.Assert;
@@ -45,7 +47,7 @@ public class ApplicationModuleSource {
 
 	private final JavaPackage moduleBasePackage;
 	private final ApplicationModuleIdentifier identifier;
-	private final Function<ApplicationModuleInformation, NamedInterfaces> namedInterfacesFactory;
+	private final BiFunction<JavaPackage, ApplicationModuleInformation, NamedInterfaces> namedInterfacesFactory;
 
 	/**
 	 * Creates a new {@link ApplicationModuleSource} for the given module base package and module name.
@@ -55,7 +57,7 @@ public class ApplicationModuleSource {
 	 * @param namedInterfacesFactory must not be {@literal null}.
 	 */
 	private ApplicationModuleSource(JavaPackage moduleBasePackage, ApplicationModuleIdentifier identifier,
-			Function<ApplicationModuleInformation, NamedInterfaces> namedInterfacesFactory) {
+			BiFunction<JavaPackage, ApplicationModuleInformation, NamedInterfaces> namedInterfacesFactory) {
 
 		Assert.notNull(moduleBasePackage, "JavaPackage must not be null!");
 		Assert.notNull(identifier, "ApplicationModuleIdentifier must not be null!");
@@ -89,7 +91,7 @@ public class ApplicationModuleSource {
 							.orElseGet(() -> ApplicationModuleIdentifier.of(
 									fullyQualifiedModuleNames ? it.getName() : rootPackage.getTrailingName(it)));
 
-					return new ApplicationModuleSource(it, id, (info) -> strategy.detectNamedInterfaces(it, info));
+					return new ApplicationModuleSource(it, id, (info, pkg) -> strategy.detectNamedInterfaces(info, pkg));
 				});
 	}
 
@@ -102,7 +104,7 @@ public class ApplicationModuleSource {
 	 */
 	static ApplicationModuleSource from(JavaPackage pkg, String identifier) {
 		return new ApplicationModuleSource(pkg, ApplicationModuleIdentifier.of(identifier),
-				(info) -> NamedInterfaces.of(pkg, info));
+				(__, info) -> NamedInterfaces.of(pkg, info));
 	}
 
 	/**
@@ -110,7 +112,7 @@ public class ApplicationModuleSource {
 	 *
 	 * @return will never be {@literal null}.
 	 */
-	public JavaPackage getModuleBasePackage() {
+	JavaPackage getModuleBasePackage() {
 		return moduleBasePackage;
 	}
 
@@ -119,7 +121,7 @@ public class ApplicationModuleSource {
 	 *
 	 * @return will never be {@literal null}.
 	 */
-	public ApplicationModuleIdentifier getIdentifier() {
+	ApplicationModuleIdentifier getIdentifier() {
 		return identifier;
 	}
 
@@ -130,11 +132,23 @@ public class ApplicationModuleSource {
 	 * @return will never be {@literal null}.
 	 * @since 1.4
 	 */
-	public NamedInterfaces getNamedInterfaces(ApplicationModuleInformation information) {
+	NamedInterfaces getNamedInterfaces(ApplicationModuleInformation information) {
+		return getNamedInterfaces(information, moduleBasePackage);
+	}
+
+	/**
+	 * Returns all {@link NamedInterfaces} for the given {@link ApplicationModuleInformation} and a customized
+	 * {@link JavaPackage}.
+	 *
+	 * @param information must not be {@literal null}.
+	 * @return will never be {@literal null}.
+	 * @since 1.4.2
+	 */
+	NamedInterfaces getNamedInterfaces(ApplicationModuleInformation information, JavaPackage basePackage) {
 
 		Assert.notNull(information, "ApplicationModuleInformation must not be null!");
 
-		return namedInterfacesFactory.apply(information);
+		return namedInterfacesFactory.apply(basePackage, information);
 	}
 
 	/*
@@ -142,7 +156,7 @@ public class ApplicationModuleSource {
 	 * @see java.lang.Object#equals(java.lang.Object)
 	 */
 	@Override
-	public boolean equals(Object obj) {
+	public boolean equals(@Nullable Object obj) {
 
 		if (obj == this) {
 			return true;
@@ -240,7 +254,7 @@ public class ApplicationModuleSource {
 		 * @param delegates must not be {@literal null}.
 		 * @return will never be {@literal null}.
 		 */
-		private static ApplicationModuleSourceMetadata delegating(ApplicationModuleSourceMetadata... delegates) {
+		private static ApplicationModuleSourceMetadata delegating(@Nullable ApplicationModuleSourceMetadata... delegates) {
 
 			return new ApplicationModuleSourceMetadata() {
 

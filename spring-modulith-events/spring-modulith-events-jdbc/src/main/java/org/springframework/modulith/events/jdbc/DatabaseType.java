@@ -87,6 +87,11 @@ enum DatabaseType {
 		boolean isSchemaSupported() {
 			return false;
 		}
+
+		@Override
+		String getLimitClause(long limit) {
+			return " OFFSET 0 ROWS FETCH NEXT " + limit + " ROWS ONLY";
+		}
 	},
 
 	ORACLE("oracle", "Oracle") {
@@ -105,9 +110,15 @@ enum DatabaseType {
 		boolean isSchemaSupported() {
 			return false;
 		}
+
+		@Override
+		String getLimitClause(long limit) {
+			return " FETCH FIRST " + limit + " ROWS ONLY";
+		}
 	};
 
 	static final String SCHEMA_NOT_SUPPORTED = "Setting the schema name is not supported!";
+	static final String SCHEMA_ROOT = "org/springframework/modulith/events/jdbc/schemas";
 
 	static DatabaseType from(String productName) {
 
@@ -135,11 +146,21 @@ enum DatabaseType {
 		return (UUID) id;
 	}
 
-	String getSchemaResourceFilename() {
-		return "/schema-" + value + ".sql";
+	String getSchemaResourceFilename(boolean legacy) {
+		return getSchemaBase(legacy) + ".sql";
 	}
 
-	String getArchiveSchemaResourceFilename() { return "/schema-" + value + "-archive.sql"; }
+	String getArchiveSchemaResourceFilename(boolean legacy) {
+		return getSchemaBase(legacy) + "-archive.sql";
+	}
+
+	String getLimitClause(long limit) {
+		return " LIMIT " + limit;
+	}
+
+	private String getSchemaBase(boolean legacy) {
+		return SCHEMA_ROOT + "/" + (legacy ? "v1" : "v2") + "/schema-" + value;
+	}
 
 	boolean isSchemaSupported() {
 		return true;

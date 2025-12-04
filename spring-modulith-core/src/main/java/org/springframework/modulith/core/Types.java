@@ -21,12 +21,16 @@ import static org.springframework.modulith.core.SyntacticSugar.*;
 import java.lang.annotation.Annotation;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 import org.jmolecules.archunit.JMoleculesArchitectureRules;
+import org.jmolecules.archunit.JMoleculesArchitectureRules.VerificationDepth;
 import org.jmolecules.archunit.JMoleculesDddRules;
 import org.jmolecules.ddd.annotation.Module;
-import org.springframework.lang.Nullable;
+import org.jspecify.annotations.Nullable;
 import org.springframework.modulith.PackageInfo;
 import org.springframework.modulith.core.ApplicationModuleSource.ApplicationModuleSourceMetadata;
 import org.springframework.util.Assert;
@@ -35,6 +39,9 @@ import org.springframework.util.ClassUtils;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaMethod;
+import com.tngtech.archunit.core.domain.JavaModifier;
+import com.tngtech.archunit.core.domain.JavaType;
+import com.tngtech.archunit.core.domain.properties.HasModifiers;
 import com.tngtech.archunit.lang.ArchRule;
 
 /**
@@ -82,7 +89,7 @@ public class Types {
 		static final String AT_DOMAIN_EVENT = BASE_PACKAGE + ".event.annotation.DomainEvent";
 		static final String DOMAIN_EVENT = BASE_PACKAGE + ".event.types.DomainEvent";
 
-		private static Collection<ArchRule> RULES;
+		private static @Nullable Collection<ArchRule> RULES;
 
 		/**
 		 * Returns whether jMolecules is generally present.
@@ -123,43 +130,101 @@ public class Types {
 		 */
 		public static Collection<ArchRule> getRules() {
 
-			if (RULES == null) {
+			var rules = RULES;
+
+			if (rules == null) {
 
 				var classLoader = JMoleculesTypes.class.getClassLoader();
-				RULES = new ArrayList<ArchRule>();
+				rules = new ArrayList<ArchRule>();
 
-				if (ClassUtils.isPresent(DDD_RULES, classLoader)) {
-					RULES.add(JMoleculesDddRules.all());
+				if (ClassUtils.isPresent(DDD_RULES, classLoader) && ClassUtils.isPresent(AT_ENTITY, classLoader)) {
+					rules.add(JMoleculesDddRules.all());
 				}
 
 				if (!ClassUtils.isPresent(ARCHITECTURE_RULES, classLoader)) {
-					return RULES;
+					return rules;
 				}
 
 				if (ClassUtils.isPresent(HEXAGONAL, classLoader)) {
-					RULES.add(JMoleculesArchitectureRules.ensureHexagonal());
+					rules.add(JMoleculesArchitectureRules.ensureHexagonal(VerificationDepth.LENIENT));
 				}
 
 				if (ClassUtils.isPresent(LAYERED, classLoader)) {
-					RULES.add(JMoleculesArchitectureRules.ensureLayering());
+					rules.add(JMoleculesArchitectureRules.ensureLayering());
 				}
 
 				if (ClassUtils.isPresent(ONION, classLoader)) {
-					RULES.add(JMoleculesArchitectureRules.ensureOnionClassical());
-					RULES.add(JMoleculesArchitectureRules.ensureOnionSimple());
+					rules.add(JMoleculesArchitectureRules.ensureOnionClassical());
+					rules.add(JMoleculesArchitectureRules.ensureOnionSimple());
 				}
+
+				RULES = rules;
 			}
 
-			return RULES;
+			return rules;
 		}
 	}
 
 	static class JavaTypes {
 
 		static Predicate<JavaClass> IS_CORE_JAVA_TYPE = it -> it.getName().startsWith("java.")
-				|| it.getName().startsWith("javax.");
+				|| it.getName().startsWith("javax.")
+				|| it.isPrimitive();
 
 		static Predicate<JavaClass> IS_NOT_CORE_JAVA_TYPE = Predicate.not(IS_CORE_JAVA_TYPE);
+
+		/**
+		 * Returns all related types of the given one, i.e., all public, non-core, non-primitive Java types declared on
+		 * public methods (as either return type or parameter) and constructors, with the given filter applied.
+		 *
+		 * @param type must not be {@literal null}.
+		 * @param filter must not be {@literal null}.
+		 * @return will never be {@literal null}.
+		 * @since 2.0
+		 */
+		static Stream<JavaClass> relatedTypesOf(JavaClass type, Predicate<? super JavaClass> filter) {
+
+			if (JavaTypes.IS_CORE_JAVA_TYPE.or(Predicate.not(JavaTypes::isPublic)).test(type)) {
+				return Stream.empty();
+			}
+
+			var result = new HashSet<JavaClass>();
+
+			collectExposedTypes(type, result, filter, new HashSet<>());
+
+			return result.stream();
+		}
+
+		private static void collectExposedTypes(JavaClass type, Set<JavaClass> exposedTypes,
+				Predicate<? super JavaClass> filter, Collection<JavaType> visited) {
+
+			if (visited.contains(type)) {
+				return;
+			}
+
+			visited.add(type);
+
+			if (filter.test(type)) {
+				exposedTypes.add(type);
+			}
+
+			var constructorParameters = type.getAllConstructors().stream()
+					.filter(JavaTypes::isPublic)
+					.flatMap(it -> it.getParameterTypes().stream());
+
+			var methodReturnTypeAndParameters = type.getAllMethods().stream()
+					.filter(JavaTypes::isPublic)
+					.flatMap(it -> Stream.concat(it.getParameterTypes().stream(), Stream.of(it.getReturnType())));
+
+			Stream.concat(constructorParameters, methodReturnTypeAndParameters)
+					.flatMap(it -> it.getAllInvolvedRawTypes().stream())
+					.filter(IS_NOT_CORE_JAVA_TYPE.and(JavaTypes::isPublic).and(filter))
+					.forEach(it -> collectExposedTypes(it, exposedTypes, filter, visited));
+		}
+
+		private static boolean isPublic(HasModifiers source) {
+			return source.getModifiers().contains(JavaModifier.PUBLIC);
+		}
 	}
 
 	static class JavaXTypes {
@@ -191,7 +256,8 @@ public class Types {
 		static final String AT_SERVICE = BASE_PACKAGE + ".stereotype.Service";
 		static final String AT_SPRING_BOOT_APPLICATION = BASE_PACKAGE + ".boot.autoconfigure.SpringBootApplication";
 		static final String AT_TX_EVENT_LISTENER = BASE_PACKAGE + ".transaction.event.TransactionalEventListener";
-		static final String AT_CONFIGURATION_PROPERTIES = BASE_PACKAGE + ".boot.context.properties.ConfigurationProperties";
+		static final String AT_CONFIGURATION_PROPERTIES = BASE_PACKAGE
+				+ ".boot.context.properties.ConfigurationProperties";
 
 		static DescribedPredicate<? super JavaClass> isConfiguration() {
 			return isAnnotatedWith(AT_CONFIGURATION);

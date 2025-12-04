@@ -15,16 +15,34 @@
  */
 package org.springframework.modulith.runtime.autoconfigure;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
+
+import org.flywaydb.core.Flyway;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.BeanFactory;
+import org.springframework.beans.factory.BeanFactoryInitializer;
+import org.springframework.beans.factory.ListableBeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.BeanDefinition;
+import org.springframework.beans.factory.config.ConfigurableBeanFactory;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBooleanProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationStartedEvent;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.flyway.autoconfigure.FlywayMigrationStrategy;
+import org.springframework.boot.system.JavaVersion;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
@@ -32,17 +50,20 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.context.annotation.Role;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.SpringFactoriesLoader;
-import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.modulith.ApplicationModuleInitializer;
 import org.springframework.modulith.core.ApplicationModule;
+import org.springframework.modulith.core.ApplicationModuleIdentifier;
 import org.springframework.modulith.core.ApplicationModuleIdentifiers;
 import org.springframework.modulith.core.ApplicationModules;
 import org.springframework.modulith.core.ApplicationModulesFactory;
+import org.springframework.modulith.core.VerificationOptions;
 import org.springframework.modulith.core.util.ApplicationModulesExporter;
 import org.springframework.modulith.runtime.ApplicationModulesRuntime;
 import org.springframework.modulith.runtime.ApplicationRuntime;
-import org.springframework.util.function.ThrowingSupplier;
+import org.springframework.modulith.runtime.flyway.SpringModulithFlywayMigrationStrategy;
+import org.springframework.modulith.test.ModuleTestExecution;
+import org.springframework.util.ClassUtils;
 
 /**
  * Auto-configuration to register an {@link ApplicationRuntime}, a {@link ApplicationModulesRuntime} and an
@@ -51,9 +72,10 @@ import org.springframework.util.function.ThrowingSupplier;
  * @author Oliver Drotbohm
  */
 @AutoConfiguration
+@EnableConfigurationProperties(SpringModulithRuntimeProperties.class)
 class SpringModulithRuntimeAutoConfiguration {
 
-	private static final AsyncTaskExecutor EXECUTOR = new SimpleAsyncTaskExecutor();
+	private static final Logger LOG = LoggerFactory.getLogger(SpringModulithRuntimeAutoConfiguration.class);
 
 	@Bean
 	@Lazy
@@ -67,13 +89,17 @@ class SpringModulithRuntimeAutoConfiguration {
 	@Lazy
 	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
 	@ConditionalOnMissingBean
-	static ApplicationModulesRuntime modulesRuntime(ApplicationRuntime runtime) {
+	static ApplicationModulesRuntime modulesRuntime(ApplicationModulesBootstrap bootstrap, ApplicationRuntime runtime) {
+		return new ApplicationModulesRuntime(() -> bootstrap.getApplicationModules().join(), runtime);
+	}
 
-		ThrowingSupplier<ApplicationModules> modules = () -> EXECUTOR
-				.submit(() -> ApplicationModulesBootstrap.initializeApplicationModules(runtime.getMainApplicationClass()))
-				.get();
-
-		return new ApplicationModulesRuntime(modules, runtime);
+	@Bean
+	@Lazy
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	@ConditionalOnMissingBean
+	static ApplicationModulesBootstrap applicationModulesInitializer(ApplicationRuntime runtime,
+			ConfigurableBeanFactory factory) {
+		return new ApplicationModulesBootstrap(runtime.getMainApplicationClass(), factory.getBootstrapExecutor());
 	}
 
 	@Bean
@@ -82,6 +108,15 @@ class SpringModulithRuntimeAutoConfiguration {
 	static ApplicationListener<ApplicationStartedEvent> applicationModuleInitializingListener(
 			ApplicationModuleInitializerInvoker invoker, ObjectProvider<ApplicationModuleInitializer> initializers) {
 		return __ -> invoker.invokeInitializers(initializers.stream());
+	}
+
+	@Bean
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	@ConditionalOnBooleanProperty(value = "spring.modulith.runtime.verification-enabled", matchIfMissing = false)
+	static RuntimeApplicationModuleVerifier applicationModuleVerifier(ApplicationModulesBootstrap bootstrap,
+			ObjectProvider<VerificationOptions> verification) {
+
+		return new RuntimeApplicationModuleVerifier(bootstrap.getApplicationModules(), verification);
 	}
 
 	/**
@@ -119,10 +154,40 @@ class SpringModulithRuntimeAutoConfiguration {
 				: ApplicationModuleIdentifiers.of(runtime.getObject().get());
 	}
 
-	private static class ApplicationModulesBootstrap {
+	private static class ModuleFilter implements Predicate<ApplicationModuleIdentifier> {
+
+		private static final boolean IN_TEST = ClassUtils.isPresent("org.springframework.modulith.test.ModuleTestExecution",
+				SpringModulithFlywayMigrationStrategy.class.getClassLoader());
+
+		private final BeanFactory factory;
+
+		ModuleFilter(BeanFactory factory) {
+			this.factory = factory;
+		}
+
+		/*
+		 * (non-Javadoc)
+		 * @see java.util.function.Predicate#test(java.lang.Object)
+		 */
+		@Override
+		public boolean test(ApplicationModuleIdentifier identifier) {
+
+			if (!IN_TEST) {
+				return true;
+			}
+
+			var execution = factory.getBeanProvider(ModuleTestExecution.class).getIfAvailable();
+
+			return execution != null ? execution.isIncludedInExecution(identifier) : true;
+		}
+	}
+
+	static class ApplicationModulesBootstrap {
 
 		private static final Logger LOGGER = LoggerFactory.getLogger(ApplicationModulesBootstrap.class);
 		private static final ApplicationModulesFactory BOOTSTRAP;
+
+		private final CompletableFuture<ApplicationModules> modules;
 
 		static {
 
@@ -130,6 +195,40 @@ class SpringModulithRuntimeAutoConfiguration {
 					ApplicationModulesBootstrap.class.getClassLoader());
 
 			BOOTSTRAP = !factories.isEmpty() ? factories.get(0) : ApplicationModulesFactory.defaultFactory();
+		}
+
+		ApplicationModulesBootstrap(Class<?> applicationMainClass, @Nullable Executor executor) {
+
+			Supplier<ApplicationModules> supplier = () -> initializeApplicationModules(applicationMainClass);
+
+			this.modules = executor == null
+					? withFallbackExecutor(supplier)
+					: CompletableFuture.supplyAsync(supplier, executor);
+
+		}
+
+		CompletableFuture<ApplicationModules> getApplicationModules() {
+			return modules;
+		}
+
+		/**
+		 * We didn't get an {@link Executor} instance handed in, so asynchronously execute the supplier through a Spring
+		 * {@link SimpleAsyncTaskExecutor} to make sure we see the right {@link ClassLoader} during the execution.
+		 *
+		 * @param <T>
+		 * @param supplier
+		 * @return
+		 */
+		private static <T> CompletableFuture<T> withFallbackExecutor(Supplier<T> supplier) {
+
+			var fallback = new SimpleAsyncTaskExecutor();
+
+			if (JavaVersion.getJavaVersion().isEqualOrNewerThan(JavaVersion.TWENTY_ONE)) {
+				fallback.setVirtualThreads(true);
+			}
+
+			return fallback.submitCompletable(supplier::get)
+					.whenComplete((m, t) -> fallback.close());
 		}
 
 		static ApplicationModules initializeApplicationModules(Class<?> applicationMainClass) {
@@ -154,6 +253,22 @@ class SpringModulithRuntimeAutoConfiguration {
 		}
 	}
 
+	@AutoConfiguration
+	@ConditionalOnClass({ Flyway.class, FlywayMigrationStrategy.class })
+	static class SpringModulithFlywayAutoConfiguration {
+
+		@Bean
+		@ConditionalOnProperty(name = "spring.modulith.runtime.flyway-enabled", havingValue = "true")
+		SpringModulithFlywayMigrationStrategy springModulithFlywayMigrationStrategy(
+				ApplicationModuleIdentifiers identifiers, BeanFactory factory) {
+
+			var filter = new ModuleFilter(factory);
+			var filtered = ApplicationModuleIdentifiers.of(identifiers.stream().filter(filter).toList());
+
+			return new SpringModulithFlywayMigrationStrategy(filtered);
+		}
+	}
+
 	/**
 	 * Auto-configuration to react to ArchUnit missing on the runtime classpath.
 	 *
@@ -170,5 +285,37 @@ class SpringModulithRuntimeAutoConfiguration {
 		ArchUnitRuntimeDependencyMissingConfiguration() {
 			throw new MissingRuntimeDependency(DESCRIPTION, SUGGESTED_ACTION);
 		}
+	}
+
+	/**
+	 * A component to verify the application module arrangement at runtime.
+	 *
+	 * @author Oliver Drotbohm
+	 * @since 2.0
+	 */
+	static class RuntimeApplicationModuleVerifier
+			implements BeanFactoryInitializer<ListableBeanFactory>, SmartInitializingSingleton {
+
+		private final CompletableFuture<Void> modules;
+
+		RuntimeApplicationModuleVerifier(CompletableFuture<ApplicationModules> modules,
+				ObjectProvider<VerificationOptions> verification) {
+
+			this.modules = modules.thenAccept(it -> {
+				it.verify(verification.getIfAvailable(VerificationOptions::defaults));
+				LOG.info("Spring Modulith application module verification completed successfully.");
+			});
+		}
+
+		/*
+		 * (non-Javadoc)
+		 * @see org.springframework.beans.factory.SmartInitializingSingleton#afterSingletonsInstantiated()
+		 */
+		@Override
+		public void afterSingletonsInstantiated() {
+			modules.join();
+		}
+
+		public void initialize(ListableBeanFactory beanFactory) {};
 	}
 }

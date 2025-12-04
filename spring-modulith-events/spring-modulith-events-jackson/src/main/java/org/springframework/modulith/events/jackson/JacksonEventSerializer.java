@@ -15,14 +15,12 @@
  */
 package org.springframework.modulith.events.jackson;
 
-import java.io.IOException;
+import tools.jackson.databind.json.JsonMapper;
+
 import java.util.function.Supplier;
 
 import org.springframework.modulith.events.core.EventSerializer;
 import org.springframework.util.Assert;
-
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * A Jackson-based {@link EventSerializer}.
@@ -31,14 +29,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  */
 class JacksonEventSerializer implements EventSerializer {
 
-	private final Supplier<ObjectMapper> mapper;
+	private final Supplier<JsonMapper> mapper;
 
 	/**
-	 * Creates a new {@link JacksonEventSerializer} for the given {@link ObjectMapper}.
+	 * Creates a new {@link JacksonEventSerializer} for the given {@link JsonMapper}.
 	 *
 	 * @param mapper must not be {@literal null}.
 	 */
-	public JacksonEventSerializer(Supplier<ObjectMapper> mapper) {
+	public JacksonEventSerializer(Supplier<JsonMapper> mapper) {
 
 		Assert.notNull(mapper, "ObjectMapper must not be null!");
 
@@ -51,12 +49,7 @@ class JacksonEventSerializer implements EventSerializer {
 	 */
 	@Override
 	public Object serialize(Object event) {
-
-		try {
-			return mapper.get().writeValueAsString(event);
-		} catch (JsonProcessingException e) {
-			throw new RuntimeException(e);
-		}
+		return mapper.get().writeValueAsString(event);
 	}
 
 	/*
@@ -65,11 +58,6 @@ class JacksonEventSerializer implements EventSerializer {
 	 */
 	@Override
 	public <T> T deserialize(Object serialized, Class<T> type) {
-
-		try {
-			return mapper.get().readerFor(type).readValue(serialized.toString());
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		}
+		return mapper.get().readerFor(type).readValue(serialized.toString());
 	}
 }

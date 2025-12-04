@@ -19,6 +19,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
 
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.extension.ConditionEvaluationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +37,7 @@ import org.springframework.util.ClassUtils;
  * @author Lukas Dohmen
  * @author David Bilge
  * @author Oliver Drotbohm
+ * @author Valentin Bossi
  * @see ModulithExecutionCondition
  */
 class TestExecutionCondition {
@@ -58,7 +60,11 @@ class TestExecutionCondition {
 		}
 
 		if (!changes.hasClassChanges()) {
-			return enabled("No source file changes detected.");
+
+			return changes.skipTestsOnNoChanges()
+					? disabled(
+							"No source file changes detected — tests skipped due to configuration \"on-no-changes=execute-none\".")
+					: enabled("No source file changes detected — running full test suite due to default configuration.");
 		}
 
 		var changedClasses = changes.getChangedClasses();
@@ -71,7 +77,7 @@ class TestExecutionCondition {
 			return enabled("Change in test class detected, executing test.");
 		}
 
-		var mainClass = SPA_CLASS_FINDER.findFromClass(testClass);
+		var mainClass = findMainClass(testClass);
 
 		if (mainClass == null) {// TODO:: Try with @ApplicationModuleTest -> main class
 			return enabled("Unable to locate SpringBootApplication Class");
@@ -120,6 +126,20 @@ class TestExecutionCondition {
 		log.info(message);
 
 		return creator.apply(message);
+	}
+
+	/**
+	 * Finds the canonical main class of the application. Falls back to {@literal null} in case multiple types are found.
+	 *
+	 * @param testClass must not be {@literal null}.
+	 */
+	private static @Nullable Class<?> findMainClass(Class<?> testClass) {
+
+		try {
+			return SPA_CLASS_FINDER.findFromClass(testClass);
+		} catch (IllegalStateException o_O) {
+			return null;
+		}
 	}
 
 	record ConditionContext(Class<?> testClass, Changes changes) {}

@@ -33,12 +33,11 @@ dependencies {
 ----
 ======
 
-IMPORTANT: It's worth noting that using the runtime support of Spring Modulith will mean that you include both https://www.archunit.org/[ArchUnit] and the https://jgrapht.org/[JGraphT] (required to topologically sort application modules) library in your application.
-
 Adding this JAR will cause Spring Boot auto-configuration to run that registers the following components in your application:
 
 * An `ApplicationModulesRuntime` that allows to access the `ApplicationModules`.
 * A `SpringBootApplicationRuntime` to back the former bean to detect the main application class.
+* A `RuntimeApplicationModuleVerifier` to verify the application module arrangement on startup and abort it if violations are detected, only if `spring.modulith.runtime.verification-enabled` is configured to `true`.
 * An event listener for https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/#features.spring-application.application-events-and-listeners[`ApplicationStartedEvent`]s that will invoke xref:runtime.adoc#application-module-initializer[`ApplicationModuleInitializer`] beans defined in the application context.
 
 [[application-module-initializer]]
@@ -106,3 +105,22 @@ class MyInitializer : ApplicationModuleInitializer {
 ----
 ======
 Note that the `ApplicationModuleInitializer` beans will only be invoked if the `spring-modulith-runtime` JAR is on the classpath (see xref:runtime.adoc#setup[Setting up Runtime Support for Application Modules]) as that pulls in the dependencies that are needed to topologically sort the initializers according to the application module structure.
+
+[[module-aware-flyway-migrations]]
+== Application-Module Aware Flyway Migrations
+
+As of Spring Modulith 2.0, we support the execution of module-specific https://docs.spring.io/spring-boot/how-to/data-initialization.html#howto.data-initialization.migration-tool.flyway[Flyway migrations].
+Application modules are encouraged to define migrations for their own persistent data only, which means that these migrations have to be executed in the order of the module dependency tree.
+
+Assume a default Flyway setup with migrations located in `classpath:db/migration`, two application modules `first` and `second` (with `second` depending on `first`), and an activated `spring.modulith.runtime.flyway-enabled` xref:appendix.adoc#configuration-properties[configuration property].
+
+With that in place we will customize the Flyway setup as follows:
+
+- The root migration folder will be changed to `db/migration/__root`. For that, the default version tracking table will be used.
+- Additional migrations for `db/migration/$moduleIdentifier` will be registered with a tracking table of `flyway_schema_history_$moduleIdentifier`.
+These migrations are also set up to a baseline version of 0 and set up to baseline on migrate.
+- Migration locations ending in a wildcard will not be customized.
+
+Note, that he version numbers used in migration scripts are now effectively scoped to the application module and should not use global ordering.
+
+By selecting which folder to place the migration files in, you can differentiate migrations always to be run from ones that will only get executed for the corresponding module. The application module test integration will only execute the default migration and the ones for modules included in the test run.

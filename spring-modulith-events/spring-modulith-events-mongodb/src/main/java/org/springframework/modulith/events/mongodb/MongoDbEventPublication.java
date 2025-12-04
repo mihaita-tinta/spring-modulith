@@ -18,9 +18,10 @@ package org.springframework.modulith.events.mongodb;
 import java.time.Instant;
 import java.util.UUID;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.data.annotation.PersistenceCreator;
 import org.springframework.data.mongodb.core.mapping.Document;
-import org.springframework.lang.Nullable;
+import org.springframework.modulith.events.EventPublication.Status;
 import org.springframework.util.Assert;
 
 /**
@@ -36,8 +37,11 @@ class MongoDbEventPublication {
 	final Instant publicationDate;
 	final String listenerId;
 	final Object event;
+	final @Nullable Instant lastResubmissionDate;
+	final int completionAttempts;
 
 	@Nullable Instant completionDate;
+	Status status;
 
 	/**
 	 * Creates a new {@link MongoDbEventPublication} for the given id, publication date, listener id, event and completion
@@ -51,7 +55,8 @@ class MongoDbEventPublication {
 	 */
 	@PersistenceCreator
 	MongoDbEventPublication(UUID id, Instant publicationDate, String listenerId, Object event,
-			@Nullable Instant completionDate) {
+			@Nullable Instant completionDate, @Nullable Status status, @Nullable Instant lastResubmissionDate,
+			int completionAttempts) {
 
 		Assert.notNull(id, "Id must not be null!");
 		Assert.notNull(publicationDate, "Publication date must not be null!");
@@ -63,17 +68,9 @@ class MongoDbEventPublication {
 		this.listenerId = listenerId;
 		this.event = event;
 		this.completionDate = completionDate;
-	}
-
-	/**
-	 * Creates a new {@link MongoDbEventPublication} for the given publication date, listener id and event.
-	 *
-	 * @param publicationDate must not be {@literal null}.
-	 * @param listenerId must not be {@literal null}.
-	 * @param event must not be {@literal null}.
-	 */
-	MongoDbEventPublication(UUID id, Instant publicationDate, String listenerId, Object event) {
-		this(id, publicationDate, listenerId, event, null);
+		this.status = status != null ? status : completionDate != null ? Status.COMPLETED : Status.PROCESSING;
+		this.lastResubmissionDate = lastResubmissionDate;
+		this.completionAttempts = completionAttempts;
 	}
 
 	/**
@@ -87,6 +84,8 @@ class MongoDbEventPublication {
 		Assert.notNull(instant, "Instant must not be null!");
 
 		this.completionDate = instant;
+		this.status = Status.COMPLETED;
+
 		return this;
 	}
 }

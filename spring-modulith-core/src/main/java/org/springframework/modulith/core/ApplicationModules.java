@@ -32,9 +32,9 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.aot.generate.Generated;
 import org.springframework.core.annotation.AnnotationAwareOrderComparator;
-import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 import org.springframework.util.ClassUtils;
 import org.springframework.util.function.SingletonSupplier;
@@ -61,7 +61,7 @@ public class ApplicationModules implements Iterable<ApplicationModule> {
 	private static final Map<CacheKey, ApplicationModules> CACHE = new ConcurrentHashMap<>();
 
 	private static final ImportOption IMPORT_OPTION = new ImportOption.DoNotIncludeTests();
-	private static final DescribedPredicate<CanBeAnnotated> IS_GENERATED;
+	private static final @Nullable DescribedPredicate<CanBeAnnotated> IS_GENERATED;
 	private static final DescribedPredicate<HasName> IS_SPRING_CGLIB_PROXY = nameContaining("$$SpringCGLIB$$");
 
 	static {
@@ -146,9 +146,12 @@ public class ApplicationModules implements Iterable<ApplicationModule> {
 		this.modules = sources.stream() //
 				.map(it -> {
 
-					return new ApplicationModule(it,
-							JavaPackages.onlySubPackagesOf(it.getModuleBasePackage(),
-									sources.stream().map(ApplicationModuleSource::getModuleBasePackage).toList())); //
+					var exclusions = sources.stream()
+							.map(ApplicationModuleSource::getModuleBasePackage)
+							.toList();
+
+					return new ApplicationModule(it, new JavaPackages(exclusions));
+
 				})
 				.collect(toMap(ApplicationModule::getIdentifier, Function.identity()));
 
@@ -328,8 +331,7 @@ public class ApplicationModules implements Iterable<ApplicationModule> {
 
 		Assert.notNull(type, "Type must not be null!");
 
-		return modules.values().stream() //
-				.anyMatch(module -> module.contains(type));
+		return modules.values().stream().anyMatch(module -> module.contains(type));
 	}
 
 	/**
@@ -499,7 +501,7 @@ public class ApplicationModules implements Iterable<ApplicationModule> {
 				.flatMap(it -> it.getDetails().stream())
 				.collect(toViolations());
 
-		var dependencyViolations = Stream.concat(rootModules.get().stream(), modules.values().stream()) //
+		var dependencyViolations = allModules() //
 				.map(it -> it.detectDependencies(this)) //
 				.reduce(NONE, Violations::and);
 
@@ -579,16 +581,24 @@ public class ApplicationModules implements Iterable<ApplicationModule> {
 		return getParentOf(module).isPresent();
 	}
 
+	/**
+	 * Returns all nested modules of the given {@link ApplicationModule}.
+	 *
+	 * @param module must not be {@literal null}.
+	 * @return will never be {@literal null}.
+	 * @since 1.4.2
+	 */
+	public Collection<ApplicationModule> getNestedModules(ApplicationModule module) {
+		return module.getNestedModules(this);
+	}
+
 	/*
 	 * (non-Javadoc)
 	 * @see java.lang.Iterable#iterator()
 	 */
 	@Override
 	public Iterator<ApplicationModule> iterator() {
-
-		return orderedNames != null
-				? orderedNames.stream().map(this::getRequiredModule).iterator()
-				: modules.values().iterator();
+		return orderedModules().iterator();
 	}
 
 	/*
@@ -624,9 +634,9 @@ public class ApplicationModules implements Iterable<ApplicationModule> {
 	 * {@literal null} or its type does not reside in any module.
 	 *
 	 * @param object can be {@literal null}.
-	 * @return
+	 * @return can be {@literal null}.
 	 */
-	private Integer getModuleIndexFor(@Nullable Object object) {
+	private @Nullable Integer getModuleIndexFor(@Nullable Object object) {
 
 		return Optional.ofNullable(object)
 				.map(it -> Class.class.isInstance(it) ? Class.class.cast(it) : it.getClass())
@@ -661,7 +671,13 @@ public class ApplicationModules implements Iterable<ApplicationModule> {
 	 * @since 1.1
 	 */
 	private Stream<ApplicationModule> allModules() {
-		return Stream.concat(modules.values().stream(), rootModules.get().stream());
+		return Stream.concat(orderedModules(), rootModules.get().stream());
+	}
+
+	private Stream<ApplicationModule> orderedModules() {
+		return orderedNames != null
+				? orderedNames.stream().map(this::getRequiredModule)
+				: modules.values().stream().sorted();
 	}
 
 	/**
@@ -778,7 +794,7 @@ public class ApplicationModules implements Iterable<ApplicationModule> {
 		 * @see java.lang.Object#equals(java.lang.Object)
 		 */
 		@Override
-		public boolean equals(Object obj) {
+		public boolean equals(@Nullable Object obj) {
 
 			if (obj == this) {
 				return true;
@@ -831,6 +847,10 @@ public class ApplicationModules implements Iterable<ApplicationModule> {
 
 		private static boolean visit(ApplicationModule module, ApplicationModules modules, Set<ApplicationModule> visited,
 				Set<ApplicationModule> inProgress, int level, Map<Integer, Set<ApplicationModuleIdentifier>> levelMap) {
+
+			if (module.isRootModule()) {
+				return false;
+			}
 
 			if (inProgress.contains(module)) {
 				return true;

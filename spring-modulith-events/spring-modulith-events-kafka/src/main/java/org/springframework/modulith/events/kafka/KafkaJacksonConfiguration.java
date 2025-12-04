@@ -15,36 +15,37 @@
  */
 package org.springframework.modulith.events.kafka;
 
+import tools.jackson.databind.json.JsonMapper;
+
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigureBefore;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration;
+import org.springframework.boot.kafka.autoconfigure.KafkaAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.PropertySource;
-import org.springframework.kafka.support.converter.ByteArrayJsonMessageConverter;
+import org.springframework.kafka.support.converter.ByteArrayJacksonJsonMessageConverter;
 import org.springframework.kafka.support.converter.RecordMessageConverter;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-
 /**
- * Auto-configures Spring for Apache Kafka to use JSON as transport format by default.
+ * Auto-configures Spring for Apache Kafka to use JSON as transport format by default via Jackson 3.
  *
  * @author Oliver Drotbohm
  * @since 1.1
  */
 @AutoConfiguration
-@AutoConfigureBefore(KafkaAutoConfiguration.class)
-@ConditionalOnClass(ObjectMapper.class)
+@AutoConfigureBefore({ KafkaAutoConfiguration.class, KafkaJackson2Configuration.class })
+@ConditionalOnClass(JsonMapper.class)
 @ConditionalOnProperty(name = "spring.modulith.events.kafka.enable-json", havingValue = "true", matchIfMissing = true)
 @PropertySource("classpath:kafka-json.properties")
 class KafkaJacksonConfiguration {
 
 	@Bean
 	@ConditionalOnMissingBean(RecordMessageConverter.class)
-	ByteArrayJsonMessageConverter jsonMessageConverter(ObjectProvider<ObjectMapper> mapper) {
-		return new ByteArrayJsonMessageConverter(mapper.getIfUnique(() -> new ObjectMapper()));
+	@ConditionalOnClass(JsonMapper.class)
+	ByteArrayJacksonJsonMessageConverter jacksonJsonMessageConverter(ObjectProvider<JsonMapper> mapper) {
+		return new ByteArrayJacksonJsonMessageConverter(mapper.getIfUnique(() -> new JsonMapper()));
 	}
 }

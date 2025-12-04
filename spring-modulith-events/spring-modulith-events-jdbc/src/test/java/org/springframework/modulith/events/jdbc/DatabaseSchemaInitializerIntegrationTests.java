@@ -25,7 +25,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
-import org.springframework.boot.test.autoconfigure.jdbc.JdbcTest;
+import org.springframework.boot.jdbc.test.autoconfigure.JdbcTest;
 import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.modulith.events.core.EventSerializer;
 import org.springframework.modulith.testapp.TestApplication;
@@ -53,7 +53,7 @@ class DatabaseSchemaInitializerIntegrationTests {
 
 	@Nested
 	@JdbcTest(properties = "spring.modulith.events.jdbc.schema-initialization.enabled=true")
-	static class WithInitEnabled extends TestBase {
+	class WithInitEnabled extends TestBase {
 
 		@Autowired JdbcOperations operations;
 		@Autowired Optional<DatabaseSchemaInitializer> initializer;
@@ -130,7 +130,7 @@ class DatabaseSchemaInitializerIntegrationTests {
 	@Nested
 	@ActiveProfiles("mssql")
 	class MSSQL extends WithInitEnabled {}
-	
+
 	@Nested
 	@ActiveProfiles("oracle")
 	class Oracle extends WithInitEnabled {}

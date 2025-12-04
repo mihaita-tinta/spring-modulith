@@ -1,2 +1,12 @@
+aptk=APTK
+archunit=ArchUnit
+cute=Cute
+flapdoodle-mongodb=Flapdoodle MongoDB
+jgit=jGit
 jmolecules-bom=jMolecules
+lombok=Lombok
+micrometer-tracing=Micrometer Tracing
+mongodb=MongoDB
 spring-framework=Spring Framework
+structurizr=Structurizr
+testcontainers=Testcontainers

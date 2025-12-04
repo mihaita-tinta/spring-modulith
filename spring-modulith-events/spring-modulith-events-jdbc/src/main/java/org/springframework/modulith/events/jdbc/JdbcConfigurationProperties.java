@@ -15,10 +15,10 @@
  */
 package org.springframework.modulith.events.jdbc;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.DefaultValue;
-import org.springframework.lang.Nullable;
 
 /**
  * Configuration properties for JDBC.
@@ -30,7 +30,8 @@ import org.springframework.lang.Nullable;
 class JdbcConfigurationProperties {
 
 	private final SchemaInitialization schemaInitialization;
-	private final String schema;
+	private final @Nullable String schema;
+	private final boolean useLegacyStructure;
 
 	/**
 	 * Creates a new {@link JdbcConfigurationProperties} instance.
@@ -39,10 +40,12 @@ class JdbcConfigurationProperties {
 	 * @param schema the schema name of event publication table, can be {@literal null}.
 	 */
 	@ConstructorBinding
-	JdbcConfigurationProperties(SchemaInitialization schemaInitialization, @Nullable String schema) {
+	JdbcConfigurationProperties(SchemaInitialization schemaInitialization, @Nullable String schema,
+			@Nullable Boolean useLegacyStructure) {
 
 		this.schemaInitialization = schemaInitialization;
 		this.schema = schema;
+		this.useLegacyStructure = useLegacyStructure == null ? false : useLegacyStructure.booleanValue();
 	}
 
 	/**
@@ -57,9 +60,17 @@ class JdbcConfigurationProperties {
 	 *
 	 * @return can be {@literal null}.
 	 */
-	@Nullable
-	public String getSchema() {
+	public @Nullable String getSchema() {
 		return schema;
+	}
+
+	/**
+	 * Whether to use the legacy event publication database schema.
+	 *
+	 * @since 2.0
+	 */
+	public boolean isUseLegacyStructure() {
+		return useLegacyStructure;
 	}
 
 	void verify(DatabaseType databaseType) {

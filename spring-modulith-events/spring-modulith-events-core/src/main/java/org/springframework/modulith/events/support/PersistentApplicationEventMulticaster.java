@@ -15,7 +15,6 @@
  */
 package org.springframework.modulith.events.support;
 
-import java.lang.reflect.Method;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
@@ -25,6 +24,8 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.SmartInitializingSingleton;
@@ -36,10 +37,10 @@ import org.springframework.context.event.ApplicationListenerMethodAdapter;
 import org.springframework.core.ResolvableType;
 import org.springframework.core.annotation.AnnotationAwareOrderComparator;
 import org.springframework.core.env.Environment;
-import org.springframework.lang.NonNull;
-import org.springframework.lang.Nullable;
 import org.springframework.modulith.events.EventPublication;
+import org.springframework.modulith.events.FailedEventPublications;
 import org.springframework.modulith.events.IncompleteEventPublications;
+import org.springframework.modulith.events.ResubmissionOptions;
 import org.springframework.modulith.events.core.ConditionalEventListener;
 import org.springframework.modulith.events.core.EventPublicationRegistry;
 import org.springframework.modulith.events.core.PublicationTargetIdentifier;
@@ -47,7 +48,6 @@ import org.springframework.modulith.events.core.TargetEventPublication;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalApplicationListener;
 import org.springframework.util.Assert;
-import org.springframework.util.ReflectionUtils;
 
 /**
  * An {@link org.springframework.context.event.ApplicationEventMulticaster} to register {@link EventPublication}s in an
@@ -61,26 +61,15 @@ import org.springframework.util.ReflectionUtils;
  * @see CompletionRegisteringAdvisor
  */
 public class PersistentApplicationEventMulticaster extends AbstractApplicationEventMulticaster
-		implements IncompleteEventPublications, SmartInitializingSingleton {
+		implements FailedEventPublications, IncompleteEventPublications, SmartInitializingSingleton {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(PersistentApplicationEventMulticaster.class);
-	private static final Method LEGACY_SHOULD_HANDLE = ReflectionUtils.findMethod(ApplicationListenerMethodAdapter.class,
-			"shouldHandle", ApplicationEvent.class, Object[].class);
-	private static final Method SHOULD_HANDLE = ReflectionUtils.findMethod(ApplicationListenerMethodAdapter.class,
-			"shouldHandle", ApplicationEvent.class);
 
 	static final String REPUBLISH_ON_RESTART = "spring.modulith.events.republish-outstanding-events-on-restart";
 	static final String REPUBLISH_ON_RESTART_LEGACY = "spring.modulith.republish-outstanding-events-on-restart";
 
 	private final @NonNull Supplier<EventPublicationRegistry> registry;
 	private final @NonNull Supplier<Environment> environment;
-
-	static {
-
-		if (SHOULD_HANDLE == null) {
-			ReflectionUtils.makeAccessible(LEGACY_SHOULD_HANDLE);
-		}
-	}
 
 	/**
 	 * Creates a new {@link PersistentApplicationEventMulticaster} for the given {@link EventPublicationRegistry}.
@@ -166,6 +155,24 @@ public class PersistentApplicationEventMulticaster extends AbstractApplicationEv
 
 	/*
 	 * (non-Javadoc)
+	 * @see org.springframework.modulith.events.IncompleteEventPublications#resubmitIncompletePublications(org.springframework.modulith.events.ResubmissionOptions)
+	 */
+	@Override
+	public void resubmitIncompletePublications(ResubmissionOptions options) {
+		doResubmitIncompletePublications(options);
+	}
+
+	/*
+	 * (non-Javadoc)
+	 * @see org.springframework.modulith.events.FailedEventPublications#resubmit(org.springframework.modulith.events.ResubmissionOptions)
+	 */
+	@Override
+	public void resubmit(ResubmissionOptions options) {
+		doResubmitIncompletePublications(options);
+	}
+
+	/*
+	 * (non-Javadoc)
 	 * @see org.springframework.beans.factory.SmartInitializingSingleton#afterSingletonsInstantiated()
 	 */
 	@Override
@@ -194,8 +201,11 @@ public class PersistentApplicationEventMulticaster extends AbstractApplicationEv
 				.map(it -> executeListenerWithCompletion(publication, it)) //
 				.orElseGet(() -> {
 
-					LOGGER.error("Listener {} not found! Skipping invocation and leaving event publication {} incomplete.",
+					LOGGER.error("Listener {} not found! Skipping invocation and leaving event publication {} failed.",
 							publication.getTargetIdentifier(), publication.getIdentifier());
+
+					registry.get().markFailed(publication.getEvent(), publication.getTargetIdentifier());
+
 					return null;
 				});
 	}
@@ -204,6 +214,10 @@ public class PersistentApplicationEventMulticaster extends AbstractApplicationEv
 			Predicate<EventPublication> filter) {
 
 		registry.get().processIncompletePublications(filter, this::invokeTargetListener, duration);
+	}
+
+	private void doResubmitIncompletePublications(ResubmissionOptions options) {
+		registry.get().processFailedPublications(options, this::invokeTargetListener);
 	}
 
 	private static ApplicationListener<ApplicationEvent> executeListenerWithCompletion(EventPublication publication,
@@ -233,7 +247,7 @@ public class PersistentApplicationEventMulticaster extends AbstractApplicationEv
 	private static boolean matches(ApplicationEvent event, Object payload, ApplicationListener<?> listener) {
 
 		// Verify general listener matching by eagerly evaluating the condition
-		if (!invokeShouldHandle(listener, event, payload)) {
+		if (!invokeShouldHandle(listener, event)) {
 			return false;
 		}
 
@@ -243,24 +257,20 @@ public class PersistentApplicationEventMulticaster extends AbstractApplicationEv
 	}
 
 	/**
-	 * Invokes {@link ApplicationListenerMethodAdapter#shouldHandle(ApplicationEvent)} in case the given candidate is one
-	 * in the first place but falls back to call {@code shouldHandle(ApplicationEvent, Object)} reflectively as fallback.
+	 * Checks if the given listener should handle the specified event by invoking
+	 * {@link ApplicationListenerMethodAdapter#shouldHandle(ApplicationEvent)} when applicable.
 	 *
 	 * @param candidate the listener to test, must not be {@literal null}.
 	 * @param event the event to publish, must not be {@literal null}.
-	 * @param payload the actual payload, must not be {@literal null}.
 	 * @return whether the event should be handled by the given candidate.
 	 */
-	@SuppressWarnings("null")
-	private static boolean invokeShouldHandle(ApplicationListener<?> candidate, ApplicationEvent event, Object payload) {
+	private static boolean invokeShouldHandle(ApplicationListener<?> candidate, ApplicationEvent event) {
 
-		if (!(candidate instanceof ApplicationListenerMethodAdapter listener)) {
-			return true;
+		if (candidate instanceof ApplicationListenerMethodAdapter listener) {
+			return listener.shouldHandle(event);
 		}
 
-		return SHOULD_HANDLE != null
-				? listener.shouldHandle(event)
-				: (boolean) ReflectionUtils.invokeMethod(LEGACY_SHOULD_HANDLE, candidate, event, new Object[] { payload });
+		return true;
 	}
 
 	/**

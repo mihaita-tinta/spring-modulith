@@ -16,6 +16,8 @@
 package org.springframework.modulith.events.jpa;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.MappedSuperclass;
 
@@ -23,6 +25,9 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
+import org.jspecify.annotations.NullUnmarked;
+import org.jspecify.annotations.Nullable;
+import org.springframework.modulith.events.EventPublication.Status;
 import org.springframework.modulith.events.jpa.archiving.ArchivedJpaEventPublication;
 import org.springframework.modulith.events.jpa.updating.DefaultJpaEventPublication;
 import org.springframework.modulith.events.support.CompletionMode;
@@ -45,7 +50,10 @@ public abstract class JpaEventPublication {
 	final String serializedEvent;
 	final Class<?> eventType;
 
-	protected Instant completionDate;
+	protected @Nullable Instant completionDate;
+	protected @Nullable Instant lastResubmissionDate;
+	protected int completionAttempts;
+	protected @Enumerated(EnumType.STRING) Status status;
 
 	/**
 	 * Creates a new {@link JpaEventPublication} for the given publication date, listener id, serialized event and event
@@ -57,7 +65,7 @@ public abstract class JpaEventPublication {
 	 * @param eventType must not be {@literal null}.
 	 */
 	protected JpaEventPublication(UUID id, Instant publicationDate, String listenerId, String serializedEvent,
-			Class<?> eventType) {
+			Class<?> eventType, @Nullable Status status, @Nullable Instant lastResubmissionDate, int completionAttempts) {
 
 		Assert.notNull(id, "Identifier must not be null!");
 		Assert.notNull(publicationDate, "Publication date must not be null!");
@@ -70,8 +78,12 @@ public abstract class JpaEventPublication {
 		this.listenerId = listenerId;
 		this.serializedEvent = serializedEvent;
 		this.eventType = eventType;
+		this.status = status != null ? status : completionDate != null ? Status.COMPLETED : Status.PROCESSING;
+		this.lastResubmissionDate = lastResubmissionDate;
+		this.completionAttempts = completionAttempts;
 	}
 
+	@NullUnmarked
 	protected JpaEventPublication() {
 
 		this.id = null;
@@ -82,8 +94,9 @@ public abstract class JpaEventPublication {
 	}
 
 	static JpaEventPublication of(UUID id, Instant publicationDate, String listenerId, String serializedEvent,
-			Class<?> eventType) {
-		return new DefaultJpaEventPublication(id, publicationDate, listenerId, serializedEvent, eventType);
+			Class<?> eventType, @Nullable Status status, @Nullable Instant lastResubmissionDate, int completionAttempts) {
+		return new DefaultJpaEventPublication(id, publicationDate, listenerId, serializedEvent, eventType, status,
+				lastResubmissionDate, completionAttempts);
 	}
 
 	static Class<? extends JpaEventPublication> getIncompleteType() {
@@ -96,7 +109,8 @@ public abstract class JpaEventPublication {
 
 	ArchivedJpaEventPublication archive(Instant instant) {
 
-		var result = new ArchivedJpaEventPublication(id, publicationDate, listenerId, serializedEvent, eventType);
+		var result = new ArchivedJpaEventPublication(id, publicationDate, listenerId, serializedEvent, eventType,
+				Status.COMPLETED, lastResubmissionDate, completionAttempts);
 		result.completionDate = instant;
 
 		return result;

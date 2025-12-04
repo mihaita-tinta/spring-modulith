@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Test;
  */
 class ApplicationModulesUnitTests {
 
-	ApplicationModules modules = TestUtils.of("example", "example.ninvalid");
+	ApplicationModules modules = TestUtils.of("example", "example.ninvalid", "example.cycle..");
 
 	@Test // GH 578
 	void discoversComplexModuleArrangement() {
@@ -79,5 +79,13 @@ class ApplicationModulesUnitTests {
 						it -> assertThat(it).contains("Invalid", "'invalid'", "'ni.nested'"),
 						it -> assertThat(it).contains("Invalid", "'invalid'", "'ni.nested.b.first'"),
 						it -> assertThat(it).contains("Invalid", "'ni'", "'ni.nested.b.first'"));
+	}
+
+	@Test // GH-1192
+	void findsTypeBySimpleName() {
+
+		assertThat(modules.getModuleByName("ni")).hasValueSatisfying(it -> {
+			assertThat(it.contains("RootType")).isTrue();
+		});
 	}
 }

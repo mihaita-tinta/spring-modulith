@@ -18,6 +18,7 @@ package org.springframework.modulith.apt;
 import io.toolisticon.aptk.tools.ElementUtils;
 import io.toolisticon.aptk.tools.wrapper.ElementWrapper;
 import io.toolisticon.aptk.tools.wrapper.ExecutableElementWrapper;
+import io.toolisticon.aptk.tools.wrapper.PackageElementWrapper;
 import io.toolisticon.aptk.tools.wrapper.TypeElementWrapper;
 
 import java.io.File;
@@ -49,8 +50,8 @@ import javax.lang.model.util.Elements;
 import javax.tools.Diagnostic.Kind;
 import javax.tools.StandardLocation;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.boot.json.JsonWriter;
-import org.springframework.lang.Nullable;
 import org.springframework.modulith.docs.metadata.MethodMetadata;
 import org.springframework.modulith.docs.metadata.TypeMetadata;
 import org.springframework.modulith.docs.util.BuildSystemUtils;
@@ -129,12 +130,12 @@ public class SpringModulithProcessor implements Processor {
 
 		try {
 
-			var path = environment.getFiler()
-					.createResource(StandardLocation.CLASS_OUTPUT, "", "META-INF/spring-modulith")
-					.toUri()
-					.toString();
+			var placeholder = environment.getFiler()
+					.createResource(StandardLocation.CLASS_OUTPUT, "", "META-INF/spring-modulith/__placeholder");
 
-			if (path.contains(BuildSystemUtils.getTestTarget())) {
+			var path = placeholder.toUri().toString();
+
+			if (BuildSystemUtils.pointsToTestTarget(path)) {
 				this.testExecution = true;
 			}
 
@@ -158,9 +159,7 @@ public class SpringModulithProcessor implements Processor {
 
 			roundEnv.getRootElements().stream()
 					.map(ElementWrapper::wrap)
-					.filter(ElementWrapper::isTypeElement)
-					.map(TypeElementWrapper::toTypeElement)
-					.flatMap(this::handle)
+					.flatMap(this::toMetadata)
 					.forEach(metadata::add);
 
 			return false;
@@ -213,8 +212,20 @@ public class SpringModulithProcessor implements Processor {
 		return false;
 	}
 
-	private Stream<TypeMetadata> handle(TypeElementWrapper type) {
-		return getTypes(type).flatMap(this::toMetadata);
+	private Stream<TypeMetadata> toMetadata(ElementWrapper<?> wrapper) {
+
+		if (wrapper.isTypeElement()) {
+			return getTypes(TypeElementWrapper.toTypeElement(wrapper)).flatMap(this::toMetadata);
+		}
+
+		if (wrapper.isPackageElement()) {
+
+			var pkg = PackageElementWrapper.toPackageElement(wrapper);
+
+			return Stream.of(new TypeMetadata(pkg.getPackageName(), getComment(pkg), Collections.emptyList()));
+		}
+
+		return Stream.empty();
 	}
 
 	private Stream<TypeMetadata> toMetadata(TypeElementWrapper it) {
@@ -319,7 +330,12 @@ public class SpringModulithProcessor implements Processor {
 		var kapt = environment.getOptions().get("kapt.kotlin.generated");
 
 		if (kapt != null) {
-			return Path.of(kapt.substring(0, kapt.indexOf("/build/generated/source")));
+
+			// Strip Gradle or Maven suffixes
+			var index = kapt.indexOf("/build/generated/source");
+			index = index == -1 ? kapt.indexOf("/target/generated-sources") : index;
+
+			return Path.of(kapt.substring(0, index));
 		}
 
 		return Path.of(".");

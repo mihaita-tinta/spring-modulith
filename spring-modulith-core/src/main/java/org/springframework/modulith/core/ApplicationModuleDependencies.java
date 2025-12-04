@@ -16,11 +16,13 @@
 package org.springframework.modulith.core;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.util.Assert;
 
 /**
@@ -29,6 +31,8 @@ import org.springframework.util.Assert;
  * @author Oliver Drotbohm
  */
 public class ApplicationModuleDependencies {
+
+	static final ApplicationModuleDependencies NONE = new ApplicationModuleDependencies(Collections.emptyList());
 
 	private final List<ApplicationModuleDependency> dependencies;
 	private final Collection<ApplicationModule> modules;
@@ -172,7 +176,7 @@ public class ApplicationModuleDependencies {
 	 * @param name must not be {@literal null} or empty.
 	 * @return will never be {@literal null}.
 	 */
-	public ApplicationModule getModuleByType(String name) {
+	public @Nullable ApplicationModule getModuleByType(String name) {
 
 		Assert.hasText(name, "Name must not be null or empty!");
 

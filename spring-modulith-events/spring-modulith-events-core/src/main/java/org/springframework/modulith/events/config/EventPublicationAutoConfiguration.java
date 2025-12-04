@@ -19,6 +19,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.Arrays;
 
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
@@ -32,12 +33,12 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.task.TaskExecutionProperties;
 import org.springframework.boot.autoconfigure.task.TaskExecutionProperties.Shutdown;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.Lifecycle;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Role;
 import org.springframework.core.env.Environment;
-import org.springframework.lang.NonNull;
 import org.springframework.modulith.events.config.EventPublicationAutoConfiguration.AsyncEnablingConfiguration;
 import org.springframework.modulith.events.core.DefaultEventPublicationRegistry;
 import org.springframework.modulith.events.core.EventPublicationRegistry;
@@ -56,7 +57,8 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
  * @author Dmitry Belyaev
  */
 @AutoConfiguration
-@Import(AsyncEnablingConfiguration.class)
+@Import({ AsyncEnablingConfiguration.class, StalenessMonitorConfiguration.class })
+@EnableConfigurationProperties(StalenessProperties.class)
 public class EventPublicationAutoConfiguration extends EventPublicationConfiguration {
 
 	@Override
